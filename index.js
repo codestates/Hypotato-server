@@ -1,6 +1,9 @@
 const express = require("express");
 const session = require("express-session");
 const cors = require("cors");
+const nodeSchedule = require("node-schedule");
+const { errorController } = require("./controller");
+const { potato } = require("./models");
 
 require("dotenv").config();
 
@@ -15,7 +18,7 @@ const port = 4000;
 app.use(
   session({
     proxy: true,
-    secret: process.env.SESSION_SECRET, // 이건 비밀 쉿!
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
     cookie: {
@@ -36,14 +39,45 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-//라우터 이름은 엔드포인트로 따봤습니다!
 app.use("/", usersRouter);
 app.use("/field", fieldRouter);
 app.use("/potato", potatoRouter);
 
-// 잘못된 접근을 할 경우 에러 핸들링 할 수 있으면 좋을 것 같다!
+app.use(errorController.pageNotFoundError);
+app.use(errorController.respondInternalError);
 
-// 썩은 감자 필터링 구현하기!
+// 썩은 감자를 필터링하기 위한 스케쥴링 설정
+// 매주마다 검사
+const BadPotatoChkSchedule = nodeSchedule.scheduleJob("* * */24 * * *", () => {
+  potato
+    .findAll()
+    .then((data) => {
+      let badPotatoFilter = data.map((potato) => {
+        let currentDate = new Date().getTime();
+        let potatoUpdatedAt = new Date(potato.createdAt).getTime();
+        let dateDiff = Math.floor(
+          (currentDate - potatoUpdatedAt) / (1000 * 3600 * 24)
+        );
+
+        if (dateDiff > 7) {
+          return potato.id;
+        }
+      });
+
+      return badPotatoFilter;
+    })
+    .then((badPotatoFilter) => {
+      badPotatoFilter.forEach((badPotato) => {
+        if (badPotato) {
+          potato
+            .update({ status: "bad" }, { where: { id: badPotato } })
+            .then(() => {
+              console.log("badPotato filter success!");
+            });
+        }
+      });
+    });
+});
 
 app.listen(port, function () {
   console.log("Welcome Hypotato World from 4000!");
